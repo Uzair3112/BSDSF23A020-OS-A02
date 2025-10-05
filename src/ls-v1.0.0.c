@@ -1,25 +1,26 @@
 /*
-* Programming Assignment 02: lsv1.1.0
-* Feature: -l (long listing format)
+* Programming Assignment 02: ls v1.2.0
+* Feature: Column display (down then across)
 */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>   // for getopt()
+#include <unistd.h>      // for getopt(), STDOUT_FILENO
 #include <dirent.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>   // for ioctl() and struct winsize
 
 extern int errno;
 
 void do_ls(const char *dir);
-void do_ls_long(const char *dir); // new function for -l (to be implemented later)
+void do_ls_long(const char *dir); // for -l option
 
 int main(int argc, char *argv[])
 {
     int opt;
-    int long_format = 0; // flag to check if -l is passed
+    int long_format = 0; // flag for -l
 
     // Parse command-line options
     while ((opt = getopt(argc, argv, "l")) != -1)
@@ -60,6 +61,9 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+/* ===========================
+   DEFAULT (NON -l) LISTING
+   =========================== */
 void do_ls(const char *dir)
 {
     struct dirent *entry;
@@ -71,29 +75,82 @@ void do_ls(const char *dir)
     }
 
     errno = 0;
+    int capacity = 10;          // initial capacity for filenames
+    int count = 0;              // number of files
+    char **files = malloc(capacity * sizeof(char *));
+    int max_len = 0;            // track longest filename
+
+    // Read directory entries
     while ((entry = readdir(dp)) != NULL)
     {
         if (entry->d_name[0] == '.')
-            continue;
-        printf("%s\n", entry->d_name);
+            continue;  // skip hidden files
+
+        // Expand array if needed
+        if (count >= capacity)
+        {
+            capacity *= 2;
+            files = realloc(files, capacity * sizeof(char *));
+        }
+
+        // Copy filename
+        files[count] = strdup(entry->d_name);
+        if ((int)strlen(entry->d_name) > max_len)
+            max_len = strlen(entry->d_name);
+
+        count++;
     }
 
     if (errno != 0)
-    {
         perror("readdir failed");
-    }
 
     closedir(dp);
+
+    /* -------------------------------
+       TASK 3 & 4: Column display logic
+       ------------------------------- */
+    struct winsize w;
+    int term_width = 80; // default fallback
+
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0)
+        term_width = w.ws_col;
+
+    int spacing = 2;
+    int num_cols = term_width / (max_len + spacing);
+    if (num_cols < 1) num_cols = 1;
+
+    int num_files = count;
+    int num_rows = (num_files + num_cols - 1) / num_cols;
+
+    // Print in "down then across" order
+    for (int row = 0; row < num_rows; row++)
+    {
+        for (int col = 0; col < num_cols; col++)
+        {
+            int index = row + col * num_rows;
+            if (index < num_files)
+            {
+                printf("%-*s", max_len + spacing, files[index]);
+            }
+        }
+        printf("\n");
+    }
+
+    // Free memory
+    for (int i = 0; i < count; i++)
+        free(files[i]);
+    free(files);
 }
 
+/* ===========================
+   LONG LISTING (-l) FEATURE
+   =========================== */
 #include <pwd.h>     // for getpwuid()
 #include <grp.h>     // for getgrgid()
 #include <time.h>    // for ctime()
 #include <sys/types.h>
-#include <sys/stat.h>
 
 void print_permissions(mode_t mode);
-void do_ls_long(const char *dir);
 
 void do_ls_long(const char *dir)
 {
@@ -154,6 +211,9 @@ void do_ls_long(const char *dir)
     closedir(dp);
 }
 
+/* ===========================
+   PERMISSIONS HELPER FUNCTION
+   =========================== */
 void print_permissions(mode_t mode)
 {
     char perms[11] = "----------";
@@ -175,7 +235,7 @@ void print_permissions(mode_t mode)
     if (mode & S_IWOTH) perms[8] = 'w';
     if (mode & S_IXOTH) perms[9] = 'x';
 
-    // Handle special bits (setuid, setgid, sticky)
+    // Special bits (setuid, setgid, sticky)
     if (mode & S_ISUID) perms[3] = (perms[3] == 'x') ? 's' : 'S';
     if (mode & S_ISGID) perms[6] = (perms[6] == 'x') ? 's' : 'S';
     if (mode & S_ISVTX) perms[9] = (perms[9] == 'x') ? 't' : 'T';
