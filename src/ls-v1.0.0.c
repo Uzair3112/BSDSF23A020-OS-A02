@@ -1,6 +1,6 @@
 /*
-* Programming Assignment 02: ls v1.2.0
-* Feature: Column display (down then across)
+* Programming Assignment 02: ls v1.3.0
+* Feature: Horizontal display (-x)
 */
 
 #include <stdio.h>
@@ -16,42 +16,50 @@ extern int errno;
 
 void do_ls(const char *dir);
 void do_ls_long(const char *dir); // for -l option
+void do_ls_horizontal(const char *dir); // for -x option
 
 int main(int argc, char *argv[])
 {
     int opt;
-    int long_format = 0; // flag for -l
+    int display_mode = 0; // 0 = default, 1 = long (-l), 2 = horizontal (-x)
 
     // Parse command-line options
-    while ((opt = getopt(argc, argv, "l")) != -1)
+    while ((opt = getopt(argc, argv, "lx")) != -1)
     {
         switch (opt)
         {
-            case 'l':
-                long_format = 1;
-                break;
-            default:
-                fprintf(stderr, "Usage: %s [-l] [directories...]\n", argv[0]);
-                exit(EXIT_FAILURE);
+        case 'l':
+            display_mode = 1; // long listing
+            break;
+        case 'x':
+            display_mode = 2; // horizontal display
+            break;
+        default:
+            fprintf(stderr, "Usage: %s [-l | -x] [directory]\n", argv[0]);
+            exit(EXIT_FAILURE);
         }
     }
 
     // If no directory specified, use current directory
     if (optind == argc)
     {
-        if (long_format)
+        if (display_mode == 1)
             do_ls_long(".");
+        else if (display_mode == 2)
+            do_ls_horizontal(".");
         else
             do_ls(".");
     }
     else
     {
-        // Process all directory arguments
+        // Process all directories given as arguments
         for (int i = optind; i < argc; i++)
         {
             printf("Directory listing of %s:\n", argv[i]);
-            if (long_format)
+            if (display_mode == 1)
                 do_ls_long(argv[i]);
+            else if (display_mode == 2)
+                do_ls_horizontal(argv[i]);
             else
                 do_ls(argv[i]);
             puts("");
@@ -60,6 +68,7 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+ 
 
 /* ===========================
    DEFAULT (NON -l) LISTING
@@ -75,10 +84,10 @@ void do_ls(const char *dir)
     }
 
     errno = 0;
-    int capacity = 10;          // initial capacity for filenames
-    int count = 0;              // number of files
+    int capacity = 10;
+    int count = 0;
     char **files = malloc(capacity * sizeof(char *));
-    int max_len = 0;            // track longest filename
+    int max_len = 0;
 
     // Read directory entries
     while ((entry = readdir(dp)) != NULL)
@@ -86,14 +95,12 @@ void do_ls(const char *dir)
         if (entry->d_name[0] == '.')
             continue;  // skip hidden files
 
-        // Expand array if needed
         if (count >= capacity)
         {
             capacity *= 2;
             files = realloc(files, capacity * sizeof(char *));
         }
 
-        // Copy filename
         files[count] = strdup(entry->d_name);
         if ((int)strlen(entry->d_name) > max_len)
             max_len = strlen(entry->d_name);
@@ -106,11 +113,8 @@ void do_ls(const char *dir)
 
     closedir(dp);
 
-    /* -------------------------------
-       TASK 3 & 4: Column display logic
-       ------------------------------- */
     struct winsize w;
-    int term_width = 80; // default fallback
+    int term_width = 80;
 
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0)
         term_width = w.ws_col;
@@ -129,14 +133,82 @@ void do_ls(const char *dir)
         {
             int index = row + col * num_rows;
             if (index < num_files)
-            {
                 printf("%-*s", max_len + spacing, files[index]);
-            }
         }
         printf("\n");
     }
 
-    // Free memory
+    for (int i = 0; i < count; i++)
+        free(files[i]);
+    free(files);
+}
+
+/* ===========================
+   HORIZONTAL DISPLAY (-x)
+   =========================== */
+void do_ls_horizontal(const char *dir)
+{
+    struct dirent *entry;
+    DIR *dp = opendir(dir);
+    if (dp == NULL)
+    {
+        fprintf(stderr, "Cannot open directory: %s\n", dir);
+        return;
+    }
+
+    errno = 0;
+    int capacity = 10;
+    int count = 0;
+    char **files = malloc(capacity * sizeof(char *));
+    int max_len = 0;
+
+    // Read directory entries
+    while ((entry = readdir(dp)) != NULL)
+    {
+        if (entry->d_name[0] == '.')
+            continue;
+
+        if (count >= capacity)
+        {
+            capacity *= 2;
+            files = realloc(files, capacity * sizeof(char *));
+        }
+
+        files[count] = strdup(entry->d_name);
+        if ((int)strlen(entry->d_name) > max_len)
+            max_len = strlen(entry->d_name);
+        count++;
+    }
+
+    if (errno != 0)
+        perror("readdir failed");
+
+    closedir(dp);
+
+    struct winsize w;
+    int term_width = 80;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0)
+        term_width = w.ws_col;
+
+    int spacing = 2;
+    int num_cols = term_width / (max_len + spacing);
+    if (num_cols < 1) num_cols = 1;
+
+    int num_files = count;
+    int num_rows = (num_files + num_cols - 1) / num_cols;
+
+    // Print in "across then down" order
+    for (int row = 0; row < num_rows; row++)
+    {
+        for (int col = 0; col < num_cols; col++)
+        {
+            int index = row * num_cols + col;
+            if (index < num_files)
+                printf("%-*s", max_len + spacing, files[index]);
+        }
+        printf("\n");
+    }
+
     for (int i = 0; i < count; i++)
         free(files[i]);
     free(files);
@@ -145,9 +217,9 @@ void do_ls(const char *dir)
 /* ===========================
    LONG LISTING (-l) FEATURE
    =========================== */
-#include <pwd.h>     // for getpwuid()
-#include <grp.h>     // for getgrgid()
-#include <time.h>    // for ctime()
+#include <pwd.h>
+#include <grp.h>
+#include <time.h>
 #include <sys/types.h>
 
 void print_permissions(mode_t mode);
@@ -168,7 +240,7 @@ void do_ls_long(const char *dir)
     while ((entry = readdir(dp)) != NULL)
     {
         if (entry->d_name[0] == '.')
-            continue; // skip hidden files
+            continue;
 
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
@@ -179,13 +251,9 @@ void do_ls_long(const char *dir)
             continue;
         }
 
-        // Print file permissions
         print_permissions(fileStat.st_mode);
-
-        // Print number of hard links
         printf(" %2ld", fileStat.st_nlink);
 
-        // Print owner and group
         struct passwd *pw = getpwuid(fileStat.st_uid);
         struct group  *gr = getgrgid(fileStat.st_gid);
 
@@ -193,15 +261,12 @@ void do_ls_long(const char *dir)
                pw ? pw->pw_name : "UNKNOWN",
                gr ? gr->gr_name : "UNKNOWN");
 
-        // Print file size
         printf(" %8ld", fileStat.st_size);
 
-        // Print modification time (trim newline from ctime)
         char *timeStr = ctime(&fileStat.st_mtime);
         timeStr[strlen(timeStr) - 1] = '\0';
         printf(" %s", timeStr);
 
-        // Print filename
         printf(" %s\n", entry->d_name);
     }
 
