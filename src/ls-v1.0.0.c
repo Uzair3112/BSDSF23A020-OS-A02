@@ -1,6 +1,6 @@
 /*
-* Programming Assignment 02: ls v1.4.0
-* Feature: Alphabetical Sort + Horizontal display (-x)
+* Programming Assignment 02: ls v1.5.0
+* Feature: Colorized Output + Alphabetical Sort + Horizontal display (-x)
 */
 
 #include <stdio.h>
@@ -11,12 +11,26 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>   // for ioctl() and struct winsize
+#include <pwd.h>
+#include <grp.h>
+#include <time.h>
+#include <sys/types.h>
 
 extern int errno;
+
+// ANSI color codes
+#define COLOR_RESET   "\033[0m"
+#define COLOR_BLUE    "\033[0;34m"
+#define COLOR_GREEN   "\033[0;32m"
+#define COLOR_RED     "\033[0;31m"
+#define COLOR_PINK    "\033[0;35m"
+#define COLOR_REVERSE "\033[7m"
 
 void do_ls(const char *dir);
 void do_ls_long(const char *dir); // for -l option
 void do_ls_horizontal(const char *dir); // for -x option
+void print_colored(const char *filename, mode_t mode);
+void print_permissions(mode_t mode);
 
 // Comparison function for qsort()
 int compare_filenames(const void *a, const void *b)
@@ -26,6 +40,9 @@ int compare_filenames(const void *a, const void *b)
     return strcmp(fa, fb); // alphabetical order
 }
 
+/* ===========================
+   MAIN FUNCTION
+   =========================== */
 int main(int argc, char *argv[])
 {
     int opt;
@@ -75,6 +92,28 @@ int main(int argc, char *argv[])
     }
 
     return 0;
+}
+
+/* ===========================
+   COLOR PRINT FUNCTION
+   =========================== */
+void print_colored(const char *filename, mode_t mode)
+{
+    const char *color = COLOR_RESET;
+
+    // Check file type
+    if (S_ISLNK(mode))
+        color = COLOR_PINK;
+    else if (S_ISDIR(mode))
+        color = COLOR_BLUE;
+    else if (S_ISREG(mode) && (mode & S_IXUSR))
+        color = COLOR_GREEN;
+    else if (strstr(filename, ".tar") || strstr(filename, ".gz") || strstr(filename, ".zip"))
+        color = COLOR_RED;
+    else if (S_ISCHR(mode) || S_ISBLK(mode) || S_ISSOCK(mode))
+        color = COLOR_REVERSE;
+
+    printf("%s%s%s", color, filename, COLOR_RESET);
 }
 
 /* ===========================
@@ -136,14 +175,26 @@ void do_ls(const char *dir)
     int num_files = count;
     int num_rows = (num_files + num_cols - 1) / num_cols;
 
-    // Print in "down then across" order
+    // Print in "down then across" order with colors
     for (int row = 0; row < num_rows; row++)
     {
         for (int col = 0; col < num_cols; col++)
         {
             int index = row + col * num_rows;
             if (index < num_files)
-                printf("%-*s", max_len + spacing, files[index]);
+            {
+                struct stat fileStat;
+                char path[1024];
+                snprintf(path, sizeof(path), "%s/%s", dir, files[index]);
+                if (lstat(path, &fileStat) == -1)
+                    continue;
+
+                printf("%-*s", max_len + spacing, "");
+                printf("\033[%dD", max_len + spacing); // move cursor back
+                print_colored(files[index], fileStat.st_mode);
+                int pad = (max_len + spacing) - strlen(files[index]);
+                for (int p = 0; p < pad; p++) printf(" ");
+            }
         }
         printf("\n");
     }
@@ -210,14 +261,24 @@ void do_ls_horizontal(const char *dir)
     int num_files = count;
     int num_rows = (num_files + num_cols - 1) / num_cols;
 
-    // Print in "across then down" order
+    // Print in "across then down" order with colors
     for (int row = 0; row < num_rows; row++)
     {
         for (int col = 0; col < num_cols; col++)
         {
             int index = row * num_cols + col;
             if (index < num_files)
-                printf("%-*s", max_len + spacing, files[index]);
+            {
+                struct stat fileStat;
+                char path[1024];
+                snprintf(path, sizeof(path), "%s/%s", dir, files[index]);
+                if (lstat(path, &fileStat) == -1)
+                    continue;
+
+                print_colored(files[index], fileStat.st_mode);
+                int pad = (max_len + spacing) - strlen(files[index]);
+                for (int p = 0; p < pad; p++) printf(" ");
+            }
         }
         printf("\n");
     }
@@ -230,13 +291,6 @@ void do_ls_horizontal(const char *dir)
 /* ===========================
    LONG LISTING (-l) FEATURE
    =========================== */
-#include <pwd.h>
-#include <grp.h>
-#include <time.h>
-#include <sys/types.h>
-
-void print_permissions(mode_t mode);
-
 void do_ls_long(const char *dir)
 {
     struct dirent *entry;
@@ -272,7 +326,7 @@ void do_ls_long(const char *dir)
     // ✅ Step 2: Sort filenames alphabetically
     qsort(files, count, sizeof(char *), compare_filenames);
 
-    // ✅ Step 3: Now print each file’s detailed info
+    // ✅ Step 3: Now print each file’s detailed info with color
     for (int i = 0; i < count; i++)
     {
         char path[1024];
@@ -298,9 +352,10 @@ void do_ls_long(const char *dir)
 
         char *timeStr = ctime(&fileStat.st_mtime);
         timeStr[strlen(timeStr) - 1] = '\0';
-        printf(" %s", timeStr);
+        printf(" %s ", timeStr);
 
-        printf(" %s\n", files[i]);
+        print_colored(files[i], fileStat.st_mode);
+        printf("\n");
     }
 
     if (errno != 0)
