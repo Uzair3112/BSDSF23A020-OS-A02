@@ -102,3 +102,4 @@ If you only passed "subdir" without its parent path:
 The program would look for "subdir" in the current working directory instead of inside "parent_dir".
 This would cause incorrect listings, "No such file or directory" errors, or skipped directories.
 By constructing the full path, each recursive call correctly operates within the context of its parent directory.
+
