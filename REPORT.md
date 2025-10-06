@@ -87,3 +87,18 @@ S_IXOTH → executable by others
 If any of these bits are set, the file is executable:
 if (mode & (S_IXUSR | S_IXGRP | S_IXOTH))
 
+----Q11. What is a "base case" in recursion? In the context of recursive ls, what is the base case?
+
+In recursion, a base case is the condition that stops the recursive function from calling itself indefinitely.
+In the context of the recursive ls, the base case occurs when the program encounters a directory that is not supposed to be explored further — specifically:
+When the entry is "." (current directory) or ".." (parent directory).
+By skipping these two entries, the recursion eventually stops once there are no more subdirectories to explore, preventing infinite loops.
+
+
+----Q12.Why is it essential to construct a full path before making a recursive call?
+
+It is essential to construct the full path (e.g., "parent_dir/subdir") before calling do_ls() so that the recursive function knows the exact location of the next directory in the filesystem.
+If you only passed "subdir" without its parent path:
+The program would look for "subdir" in the current working directory instead of inside "parent_dir".
+This would cause incorrect listings, "No such file or directory" errors, or skipped directories.
+By constructing the full path, each recursive call correctly operates within the context of its parent directory.
