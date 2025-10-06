@@ -1,6 +1,6 @@
 /*
-* Programming Assignment 02: ls v1.3.0
-* Feature: Horizontal display (-x)
+* Programming Assignment 02: ls v1.4.0
+* Feature: Alphabetical Sort + Horizontal display (-x)
 */
 
 #include <stdio.h>
@@ -17,6 +17,14 @@ extern int errno;
 void do_ls(const char *dir);
 void do_ls_long(const char *dir); // for -l option
 void do_ls_horizontal(const char *dir); // for -x option
+
+// Comparison function for qsort()
+int compare_filenames(const void *a, const void *b)
+{
+    const char *fa = *(const char **)a;
+    const char *fb = *(const char **)b;
+    return strcmp(fa, fb); // alphabetical order
+}
 
 int main(int argc, char *argv[])
 {
@@ -68,7 +76,6 @@ int main(int argc, char *argv[])
 
     return 0;
 }
- 
 
 /* ===========================
    DEFAULT (NON -l) LISTING
@@ -112,6 +119,9 @@ void do_ls(const char *dir)
         perror("readdir failed");
 
     closedir(dp);
+
+    // ✅ Sort filenames alphabetically
+    qsort(files, count, sizeof(char *), compare_filenames);
 
     struct winsize w;
     int term_width = 80;
@@ -185,6 +195,9 @@ void do_ls_horizontal(const char *dir)
 
     closedir(dp);
 
+    // ✅ Sort filenames alphabetically
+    qsort(files, count, sizeof(char *), compare_filenames);
+
     struct winsize w;
     int term_width = 80;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0)
@@ -237,13 +250,33 @@ void do_ls_long(const char *dir)
     }
 
     errno = 0;
+
+    // ✅ Step 1: Read all filenames into an array for sorting
+    int capacity = 10;
+    int count = 0;
+    char **files = malloc(capacity * sizeof(char *));
     while ((entry = readdir(dp)) != NULL)
     {
         if (entry->d_name[0] == '.')
             continue;
 
+        if (count >= capacity)
+        {
+            capacity *= 2;
+            files = realloc(files, capacity * sizeof(char *));
+        }
+        files[count++] = strdup(entry->d_name);
+    }
+    closedir(dp);
+
+    // ✅ Step 2: Sort filenames alphabetically
+    qsort(files, count, sizeof(char *), compare_filenames);
+
+    // ✅ Step 3: Now print each file’s detailed info
+    for (int i = 0; i < count; i++)
+    {
         char path[1024];
-        snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
+        snprintf(path, sizeof(path), "%s/%s", dir, files[i]);
 
         if (lstat(path, &fileStat) == -1)
         {
@@ -257,7 +290,7 @@ void do_ls_long(const char *dir)
         struct passwd *pw = getpwuid(fileStat.st_uid);
         struct group  *gr = getgrgid(fileStat.st_gid);
 
-        printf(" %-8s %-8s", 
+        printf(" %-8s %-8s",
                pw ? pw->pw_name : "UNKNOWN",
                gr ? gr->gr_name : "UNKNOWN");
 
@@ -267,13 +300,16 @@ void do_ls_long(const char *dir)
         timeStr[strlen(timeStr) - 1] = '\0';
         printf(" %s", timeStr);
 
-        printf(" %s\n", entry->d_name);
+        printf(" %s\n", files[i]);
     }
 
     if (errno != 0)
         perror("readdir failed");
 
-    closedir(dp);
+    // ✅ Free memory
+    for (int i = 0; i < count; i++)
+        free(files[i]);
+    free(files);
 }
 
 /* ===========================
