@@ -66,3 +66,24 @@ It returns:
 0 if equal
 > 0 if a > b
 
+
+----Q9: How do ANSI escape codes work to produce color in a standard Linux terminal? Show the specific code sequence for printing text in green?
+
+ANSI escape codes are special character sequences that control text formatting, color, and cursor movement in a terminal. They start with \033[ (escape character + [), followed by color or style codes, and end with m.
+For example, to print text in green, use:
+printf("\033[0;32mHello\033[0m");
+\033[0;32m → sets the text color to green
+\033[0m → resets color back to default
+
+
+
+----Q10: To color an executable file, you need to check its permission bits. Explain which bits in the st_mode field you need to check to determine if a file is executable by the owner, group, or others.
+
+The st_mode field contains permission bits that describe file access rights.
+To check if a file is executable, use these macros:
+S_IXUSR → executable by owner
+S_IXGRP → executable by group
+S_IXOTH → executable by others
+If any of these bits are set, the file is executable:
+if (mode & (S_IXUSR | S_IXGRP | S_IXOTH))
+

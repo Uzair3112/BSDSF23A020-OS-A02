@@ -1,6 +1,6 @@
 /*
-* Programming Assignment 02: ls v1.5.0
-* Feature: Colorized Output + Alphabetical Sort + Horizontal display (-x)
+* Programming Assignment 02: ls v1.6.0
+* Feature: Recursive Listing (-R) + Colorized Output + Alphabetical Sort + Horizontal display (-x)
 */
 
 #include <stdio.h>
@@ -15,6 +15,7 @@
 #include <grp.h>
 #include <time.h>
 #include <sys/types.h>
+#include <limits.h>
 
 extern int errno;
 
@@ -26,18 +27,17 @@ extern int errno;
 #define COLOR_PINK    "\033[0;35m"
 #define COLOR_REVERSE "\033[7m"
 
-void do_ls(const char *dir);
-void do_ls_long(const char *dir); // for -l option
-void do_ls_horizontal(const char *dir); // for -x option
+void do_ls(const char *dir, int recursive_flag);
+void do_ls_long(const char *dir);
+void do_ls_horizontal(const char *dir);
 void print_colored(const char *filename, mode_t mode);
 void print_permissions(mode_t mode);
 
-// Comparison function for qsort()
 int compare_filenames(const void *a, const void *b)
 {
     const char *fa = *(const char **)a;
     const char *fb = *(const char **)b;
-    return strcmp(fa, fb); // alphabetical order
+    return strcmp(fa, fb);
 }
 
 /* ===========================
@@ -47,20 +47,24 @@ int main(int argc, char *argv[])
 {
     int opt;
     int display_mode = 0; // 0 = default, 1 = long (-l), 2 = horizontal (-x)
+    int recursive_flag = 0;
 
     // Parse command-line options
-    while ((opt = getopt(argc, argv, "lx")) != -1)
+    while ((opt = getopt(argc, argv, "lxR")) != -1)
     {
         switch (opt)
         {
         case 'l':
-            display_mode = 1; // long listing
+            display_mode = 1;
             break;
         case 'x':
-            display_mode = 2; // horizontal display
+            display_mode = 2;
+            break;
+        case 'R':
+            recursive_flag = 1;
             break;
         default:
-            fprintf(stderr, "Usage: %s [-l | -x] [directory]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-l | -x | -R] [directory]\n", argv[0]);
             exit(EXIT_FAILURE);
         }
     }
@@ -73,11 +77,10 @@ int main(int argc, char *argv[])
         else if (display_mode == 2)
             do_ls_horizontal(".");
         else
-            do_ls(".");
+            do_ls(".", recursive_flag);
     }
     else
     {
-        // Process all directories given as arguments
         for (int i = optind; i < argc; i++)
         {
             printf("Directory listing of %s:\n", argv[i]);
@@ -86,7 +89,7 @@ int main(int argc, char *argv[])
             else if (display_mode == 2)
                 do_ls_horizontal(argv[i]);
             else
-                do_ls(argv[i]);
+                do_ls(argv[i], recursive_flag);
             puts("");
         }
     }
@@ -101,7 +104,6 @@ void print_colored(const char *filename, mode_t mode)
 {
     const char *color = COLOR_RESET;
 
-    // Check file type
     if (S_ISLNK(mode))
         color = COLOR_PINK;
     else if (S_ISDIR(mode))
@@ -117,9 +119,9 @@ void print_colored(const char *filename, mode_t mode)
 }
 
 /* ===========================
-   DEFAULT (NON -l) LISTING
+   DEFAULT (NON -l) LISTING + RECURSIVE SUPPORT
    =========================== */
-void do_ls(const char *dir)
+void do_ls(const char *dir, int recursive_flag)
 {
     struct dirent *entry;
     DIR *dp = opendir(dir);
@@ -135,11 +137,10 @@ void do_ls(const char *dir)
     char **files = malloc(capacity * sizeof(char *));
     int max_len = 0;
 
-    // Read directory entries
     while ((entry = readdir(dp)) != NULL)
     {
         if (entry->d_name[0] == '.')
-            continue;  // skip hidden files
+            continue;
 
         if (count >= capacity)
         {
@@ -159,7 +160,6 @@ void do_ls(const char *dir)
 
     closedir(dp);
 
-    // ✅ Sort filenames alphabetically
     qsort(files, count, sizeof(char *), compare_filenames);
 
     struct winsize w;
@@ -175,7 +175,7 @@ void do_ls(const char *dir)
     int num_files = count;
     int num_rows = (num_files + num_cols - 1) / num_cols;
 
-    // Print in "down then across" order with colors
+    printf("%s:\n", dir);
     for (int row = 0; row < num_rows; row++)
     {
         for (int col = 0; col < num_cols; col++)
@@ -184,19 +184,40 @@ void do_ls(const char *dir)
             if (index < num_files)
             {
                 struct stat fileStat;
-                char path[1024];
+                char path[PATH_MAX];
                 snprintf(path, sizeof(path), "%s/%s", dir, files[index]);
                 if (lstat(path, &fileStat) == -1)
                     continue;
 
                 printf("%-*s", max_len + spacing, "");
-                printf("\033[%dD", max_len + spacing); // move cursor back
+                printf("\033[%dD", max_len + spacing);
                 print_colored(files[index], fileStat.st_mode);
                 int pad = (max_len + spacing) - strlen(files[index]);
                 for (int p = 0; p < pad; p++) printf(" ");
             }
         }
         printf("\n");
+    }
+
+    // 🔁 Recursive part
+    if (recursive_flag)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            char path[PATH_MAX];
+            struct stat st;
+            snprintf(path, sizeof(path), "%s/%s", dir, files[i]);
+            if (lstat(path, &st) == -1)
+                continue;
+
+            if (S_ISDIR(st.st_mode) &&
+                strcmp(files[i], ".") != 0 &&
+                strcmp(files[i], "..") != 0)
+            {
+                printf("\n");
+                do_ls(path, recursive_flag);
+            }
+        }
     }
 
     for (int i = 0; i < count; i++)
@@ -223,7 +244,6 @@ void do_ls_horizontal(const char *dir)
     char **files = malloc(capacity * sizeof(char *));
     int max_len = 0;
 
-    // Read directory entries
     while ((entry = readdir(dp)) != NULL)
     {
         if (entry->d_name[0] == '.')
@@ -246,7 +266,6 @@ void do_ls_horizontal(const char *dir)
 
     closedir(dp);
 
-    // ✅ Sort filenames alphabetically
     qsort(files, count, sizeof(char *), compare_filenames);
 
     struct winsize w;
@@ -261,7 +280,6 @@ void do_ls_horizontal(const char *dir)
     int num_files = count;
     int num_rows = (num_files + num_cols - 1) / num_cols;
 
-    // Print in "across then down" order with colors
     for (int row = 0; row < num_rows; row++)
     {
         for (int col = 0; col < num_cols; col++)
@@ -289,7 +307,7 @@ void do_ls_horizontal(const char *dir)
 }
 
 /* ===========================
-   LONG LISTING (-l) FEATURE
+   LONG LISTING (-l)
    =========================== */
 void do_ls_long(const char *dir)
 {
@@ -304,8 +322,6 @@ void do_ls_long(const char *dir)
     }
 
     errno = 0;
-
-    // ✅ Step 1: Read all filenames into an array for sorting
     int capacity = 10;
     int count = 0;
     char **files = malloc(capacity * sizeof(char *));
@@ -323,10 +339,8 @@ void do_ls_long(const char *dir)
     }
     closedir(dp);
 
-    // ✅ Step 2: Sort filenames alphabetically
     qsort(files, count, sizeof(char *), compare_filenames);
 
-    // ✅ Step 3: Now print each file’s detailed info with color
     for (int i = 0; i < count; i++)
     {
         char path[1024];
@@ -361,7 +375,6 @@ void do_ls_long(const char *dir)
     if (errno != 0)
         perror("readdir failed");
 
-    // ✅ Free memory
     for (int i = 0; i < count; i++)
         free(files[i]);
     free(files);
@@ -391,7 +404,6 @@ void print_permissions(mode_t mode)
     if (mode & S_IWOTH) perms[8] = 'w';
     if (mode & S_IXOTH) perms[9] = 'x';
 
-    // Special bits (setuid, setgid, sticky)
     if (mode & S_ISUID) perms[3] = (perms[3] == 'x') ? 's' : 'S';
     if (mode & S_ISGID) perms[6] = (perms[6] == 'x') ? 's' : 'S';
     if (mode & S_ISVTX) perms[9] = (perms[9] == 'x') ? 't' : 'T';
