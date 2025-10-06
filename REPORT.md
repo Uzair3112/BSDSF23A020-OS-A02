@@ -1,10 +1,10 @@
-----Q1. Difference between stat() and lstat()
+----Q1. Difference between stat() and lstat()?
 
 stat() follows symbolic links and returns info about the target file, while lstat() returns info about the link itself.
 In ls, lstat() is used to correctly display symbolic links (e.g., link -> target) instead of showing details of the target file.
 
 
-----Q2. Using st_mode with Bitwise Operators
+----Q2. Using st_mode with Bitwise Operators?
 
 st_mode holds both file type and permission bits.
 
@@ -41,3 +41,28 @@ The horizontal ("across") display logic is more complex because it requires pre-
 and default)?
 
 I used flag checking after parsing command-line options. If -l was set, the program called the long-listing function; if -x was set, it called the horizontal display function; otherwise, it used the default vertical display function.
+
+
+
+----Q7.Why is it necessary to read all directory entries into memory before sorting?
+
+All directory entries must be read into memory first because sorting requires access to the complete dataset. The sorting algorithm (like qsort) compares and reorders elements, so it needs all filenames stored in an array.
+Drawbacks:
+For directories with millions of files, this approach can cause:
+High memory usage — storing all names at once consumes large RAM.
+Slow performance — sorting and allocating memory take longer.
+Possible crashes — system may run out of memory if the directory is too large.
+
+
+----Q8.Purpose and signature of the comparison function in qsort()?
+
+The comparison function tells qsort() how to compare two elements — in this case, two filenames — so it knows their order (alphabetical, numeric, etc.).
+int compare(const void *a, const void *b);
+The void * pointers are generic, so qsort can work with any data type.
+Inside the function, they are cast to the correct type, e.g.
+return strcmp(*(const char **)a, *(const char **)b);
+It returns:
+< 0 if a < b
+0 if equal
+> 0 if a > b
+
